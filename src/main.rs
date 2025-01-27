@@ -1,6 +1,6 @@
-use actix_web::{get, App, HttpResponse, HttpServer, Responder};
-use chrono::{NaiveDateTime, Utc};
-use serde::Serialize;
+use actix_web::{get, web, App, HttpResponse, HttpServer, Responder};
+use chrono::DateTime;
+use serde::{Deserialize, Serialize};
 use yahoo_finance_api::YahooConnector;
 
 // Define the response structure
@@ -14,19 +14,43 @@ struct PriceData {
     volume: u64,
 }
 
+#[derive(Deserialize)]
+struct QueryParam {
+    ticker: String,
+}
+
 #[get("/")]
 async fn hello() -> impl Responder {
     HttpResponse::Ok().body("Hello, this is a GET request response!")
 }
 
 #[get("/api/prices")]
-async fn get_prices() -> Result<HttpResponse, actix_web::Error> {
-    // Create a new Yahoo connector
+async fn get_prices(
+    query: Option<web::Query<QueryParam>>,
+) -> Result<HttpResponse, actix_web::Error> {
+    // Handle Errors
+    let query = match query {
+        Some(q) => q,
+        None => {
+            return Err(actix_web::error::ErrorBadRequest(
+                "Missing query parameter: ticker",
+            ));
+        }
+    };
+
+    if query.ticker.trim().is_empty() {
+        return Err(actix_web::error::ErrorBadRequest(
+            "Invalid ticker: ticker cannot be empty",
+        ));
+    }
+
+    let ticker = &query.ticker;
+
     let provider = YahooConnector::new().unwrap();
 
     // Fetch historical data for AAPL asynchronously
     let response = provider
-        .get_quote_range("AAPL", "1d", "max")
+        .get_quote_range(ticker, "1d", "max")
         .await
         .map_err(|e| actix_web::error::ErrorInternalServerError(e.to_string()))?;
 
@@ -39,8 +63,9 @@ async fn get_prices() -> Result<HttpResponse, actix_web::Error> {
     let prices: Vec<PriceData> = quotes
         .iter()
         .map(|quote| {
-            let datetime = NaiveDateTime::from_timestamp(quote.timestamp as i64, 0) // Convert Unix timestamp
-                .format("%Y-%m-%d %H:%M:%S") // Format as string
+            let datetime = DateTime::from_timestamp(quote.timestamp as i64, 0)
+                .unwrap()
+                .format("%Y-%m-%d")
                 .to_string();
 
             PriceData {
@@ -64,3 +89,5 @@ async fn main() -> std::io::Result<()> {
         .run()
         .await
 }
+
+fn calculate_rsi(closePrices: Vec<PriceData>, period: u32) {}
